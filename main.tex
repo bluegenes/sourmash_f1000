@@ -1,0 +1,696 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%
+% For more detailed article preparation guidelines, please see:
+% http://f1000research.com/author-guidelines
+
+\documentclass[10pt,a4paper,twocolumn]{article}
+\usepackage{f1000_styles}
+\usepackage{listings}
+
+%% Default: numerical citations
+\usepackage[numbers]{natbib}
+
+%% Uncomment this lines for superscript citations instead
+% \usepackage[super]{natbib}
+
+%% Uncomment these lines for author-year citations instead
+% \usepackage[round]{natbib}
+% \let\cite\citep
+
+% settings for code blocks (listings pkg)
+% see here: https://latex.ugent.be/files/documenten/listings.pdf
+\lstset{
+  basicstyle=\small,
+  xleftmargin=.05\textwidth, xrightmargin=.05\textwidth
+}
+
+\begin{document}
+
+\title{Large-scale sequence comparisons with \textit{sourmash}}
+%\titlenote{no_note}
+\author[1*]{N. Tessa Pierce}
+\author[1*]{Luiz Irber}
+\author[1,2*]{Taylor Reiter}
+\author[1*]{Phillip Brooks}
+\author[1**]{C. Titus Brown}
+\affil[*]{equal work}
+\affil[1]{Department of Population Health and Reproduction, School of Veterinary Medicine, University of California, Davis}
+\affil[2]{Food Science Graduate Group, University of California, Davis}
+\affil[**]{correspondence: ctbrown@ucdavis.edu}
+
+\maketitle
+\thispagestyle{fancy}
+
+
+\begin{abstract}
+
+The \lstinline{sourmash} software package uses MinHash-based sketching to create “signatures”, compressed representations of DNA, RNA, and protein sequences, that can be stored, searched, explored, and taxonomically annotated. \lstinline{sourmash} signatures can be used to estimate sequence similarity between very large data sets quickly and accurately, and can be used to search large databases of genomes for matches to query genomes and metagenomes. \lstinline{sourmash} is implemented in C++, Rust, and Python, and is freely available under the BSD license at \lstinline{http://github.com/dib-lab/sourmash}.
+
+
+\end{abstract}
+
+\section*{Keywords}
+
+bioinformatics, sequence analysis, MinHash, k-mer, sourmash
+
+\clearpage
+
+\section*{Introduction}
+
+Bioinformatic analyses rely on sequence similarity comparison for many applications, including variant analysis, taxonomic classification and functional annotation. As the Sequence Read Archive now contains over 20 Petabases of data \cite{ncbi_2018}, there is great need for methods to quickly and efficiently conduct similarity searches on a massive scale. MinHash techniques \cite{broder1997resemblance} utilize random sampling of k-mer content to generate small, representative subsets known as "sketches" such that Jaccard similarity (the intersection over the union) of two genomes remains approximately equal to their true Jaccard similarity \cite{broder1997resemblance, ondov2016mash}. The many-fold size reductions gained via MinHash open the door for comparisons across all sequencing data. 
+
+While the initial sequence MinHash implementation focused on enabling Jaccard similarity comparisons \cite{ondov2016mash}, it has since been modified and extended to enable k-mer abundance comparisons \cite{boveefinch}, decrease runtime and memory requirements \cite{zhao2018bindash}, and work on streaming input data \cite{rowe2018streaming}. Furthermore, as Jaccard similarity is impacted by the relative size of the sets being compared, containment searches \cite{broder1997resemblance, Koslicki184150, mash_screen} have been developed to enable detection of a small set within a larger set, such as a genome within a metagenome.
+
+Here we present version 2.0 of \lstinline{sourmash} \cite{brown2016sourmash}, a Python library for building and utilizing MinHash sketches of DNA, RNA, and protein data. \lstinline{sourmash} incorporates and extends standard MinHash techniques for sequencing data, with a particular focus towards enabling efficient containment queries using large databases. This is accomplished with two modifications: (1) building sketches via modulo approach \cite{broder1997resemblance}, and (2) implementing a modified Sequence Bloom Tree \cite{solomon2016fast} to enable both similarity and containment searches. In most cases, these features enable \lstinline{sourmash} database comparisons in sub-linear time.
+% sub-linear time is not true in all cases: if the threshold is too low, you end up doing more work (going through more internal nodes) than just doing a linear search on the signatures. See figure 3 in the allsome SBT paper https://doi.org/10.1007/978-3-319-56970-3_17
+
+Standard genomic MinHash techniques, first implemented in \cite{ondov2016mash}, retain the minimum \textit{n} k-mer hashes as a representative subset. \lstinline{sourmash} extends these methods by incorporating a user-defined "scaled" factor to build \lstinline{sourmash} sketches via a modulo approach, rather than the standard bottom-hash approach \cite{broder1997resemblance}. Sketches built with this approach retain the same fraction, rather than number, of k-mer hashes, compressing both large and small datasets at the same rate. 
+
+This enables comparisons between datasets of disparate sizes but can sacrifice some of the memory and storage benefits of standard MinHash techniques, as the signature size scales with the input data rather than remaining fixed \cite{mash_screen}. In \lstinline{sourmash}, use of the "scaled" factor enables user modification of the trade-off between search precision and sketch size, with the caveat that searches and comparisons can only be conducted using signatures generated with identical "scaled" values (downsampled at the same rate). 
+
+To enable large-scale database searches using these signatures, \lstinline{sourmash} implements a modified Sequence Bloom Tree, the SBTMH, that allows both similarity (\lstinline{sourmash search}) and containment (\lstinline{sourmash gather}) searches for taxonomic exploration and classification. Notably, Jaccard similarity searches using this modified SBT require storage of the cardinality of the smallest MinHash below each node in order to properly bound similarity. \lstinline{sourmash} also implements a second database format, LCA, for in-memory search when sufficient RAM is available or database size is tractable. 
+
+In addition to these modifications, \lstinline{sourmash} implements k-mer abundance tracking \cite{boveefinch} within signatures to allow abundance comparisons across datasets and facilitate metagenome, metatranscriptome, and transcriptome analyses, and is compatible with streaming approaches. 
+The \lstinline{sourmash} library is implemented in C++, Rust \cite{Matsakis:2014:RL:2692956.2663188}, and Python, and can be accessed both via command line and Python API. The code is available under the BSD license at \lstinline{http://github.com/dib-lab/sourmash}. %more on library functionality?
+
+
+\section*{Implementation}
+
+\lstinline{sourmash} provides a user-friendly, extensible platform to enable MinHash signature generation and manipulation for DNA, RNA, and protein data. Sourmash is designed to facilitate containment queries for taxonomic exploration and identification while maintaining all functionality available via standard genomic MinHash techniques. % improve last phrase of this sentence / emphasize library functionality, etc!
+
+% discuss Jaccard Index, Jaccard containment here
+%$$J(A, B) = \frac{\left| A \cap B \right|}{\left| A \cup B \right|}$$
+
+%$$C(A, B) = \frac{\left| A \cap B \right|}{\left| A \right|}$$
+
+\subsection*{\lstinline{sourmash} Signatures}
+
+\lstinline{sourmash} modifies standard genomic MinHash techniques by scaling the number of retained hashes to better represent and compare datasets of varying size and complexity, and by optionally tracking the abundance of each retained hash, to better represent data of metagenomic and transcriptomic origin and allow abundance comparisons.
+
+\textit{\textbf{Scaling}} \lstinline{sourmash} implements a method inspired by modulo sketches \cite{broder1997resemblance} to dynamically scale hash subset retention size (\textit{n}). When using scaled signatures, users provide  a scaling factor (\textit{s}) that divides the hash space into \textit{s} equal bands, retaining hashes within the minimum band as the sketch. These scaled signatures can be converted to standard bottom-hash signatures, if the subset retention size \textit{n} is equal to or smaller than the number of hashes in the scaled signature. \lstinline{sourmash} provides a signature utility, \lstinline{downsample}, to convert sketches when possible. Finally, to maintain compatibility with sketches generated by other programs such as Mash \cite{ondov2016mash}, \lstinline{sourmash} generates standard bottom-hash MinHash sketches if users specify the hash subset size \textit{n} rather than scaling factor.
+
+
+% koslicki: https://www.biorxiv.org/content/early/2017/09/04/184150
+
+% Titus comment: It’s important to note that we haven’t really done the math to make sure that sourmash scaled works properly. It should always be bounded by the MinHash math limits as long as the number of scaled hashes is larger than the size of the regular minhash, which is true for large data sets.
+
+%% https://github.com/dib-lab/sourmash/issues/606
+
+\textit{\textbf{Streaming Compatibility}} Scaled signature generation is streaming compatible and provides some advantages over streaming calculation using standard MinHash. As data streams in, standard MinHash replaces hashes based on the minimum hash value to maintain a fixed number of hashes in the signature. In contrast, no hash is ever removed from a scaled signature as more data is received. As a result, for searches of a database using streamed-in data, all prior matches remain valid (although their significance may change as more data is received). This allows us to place algorithmic guarantees on containment searches using streaming data.
+
+
+\textit{\textbf{Abundance tracking}} \lstinline{sourmash} extends MinHash functionality by implementing abundance tracking of k-mers. k-mer counts are incremented after hashing as each k-mer is added to the hash table. \lstinline{sourmash} tracks abundance for k-mers in the minimum band and stores this information in the signature. These values accompany the hashes in downstream comparison processes, making signatures better representations of repetitive sequences of metagenomic and transcriptomic origin. 
+
+ 
+\textit{\textbf{Signatures}} MinHash sketches associated with a single sequence file are stored together in a “signature” file, which forms the basis of all \lstinline{sourmash} comparisons. Signatures may include sketches generated with different \textit{k} sizes or molecule type (nucleotide or protein) and are stored in JSON format to maintain human readability and ensure proper interoperability. 
+
+Signatures can only be compared against signatures and databases made from the same parameters (\textit{k} size(s), scaled value, nucleotide or protein level). If signatures differ in their scaled value or size(\textit{n}), the larger signatures can be downsampled to become comparable with smaller signatures using the \textit{signature utilities}, below. \lstinline{sourmash} also provides 6-frame nucleotide translation to generate protein signatures from nucleotide input if desired.
+
+\textit{\textbf{Signature Utilities}} \lstinline{sourmash} provides a number of utilities to facilitate set operations between signatures (\lstinline{merge}, \lstinline{intersect}, \lstinline{extract}, \lstinline{downsample}, \lstinline{flatten} \lstinline{subtract}, \lstinline{overlap}), and handling (\lstinline{describe}, \lstinline{rename},  \lstinline{import}, \lstinline{export}) of \lstinline{sourmash} signatures. These can be accessed via the \lstinline{sourmash signature} subcommand. 
+
+\subsection*{SBT-MinHash}
+\lstinline{sourmash} implements a modified Sequence Bloom Tree (SBT \cite{solomon2016fast}), the SBT-MinHash (SBTMH), which can efficiently capture large volumes of MinHashes (e.g., all microbes in GenBank) and support multiple search regimes that improve on run time of linear searches. 
+
+\textit{\textbf{Implementation}} The SBTMH is a n-ary tree (binary by default), where leaf nodes are MinHash signatures and internal nodes are Bloom Filters. Each Bloom Filter contains all the values from its children, so the root node contains all the values from all signatures. SBTMH is designed to be extensible such that signatures can be subsequently added without the need for full regeneration. Adding a new signature to SBTMH causes parent nodes up to the root to be updated, but other nodes are not affected.
+
+% ganon: continuously up-to-date with database growth for precise short read classification in metagenomics https://doi.org/10.1101/4060171
+
+SBTMH trees can be combined if desired: In the simplest case, adding a new root and updating it with the content of the previous roots is sufficient, and this preserves all node information without changes. As an example, separate indices can be created for each RefSeq subdivision (bacteria, archaea, fungi, etc) and be combined depending on the application (such as an analysis for bacteria + archaea, but not fungi). In practice, this is most useful for updating the SBTMH, as both \lstinline{search} and  \lstinline{gather} support search over multiple databases without the need for combining.
+
+\textit{\textbf{Searching SBTMH}} Similarity searches start at the root of the SBTMH, and check for query elements present in each internal node. If similarity does not reach the threshold, the subtree under that node does not need to be searched. If a leaf is reached, it is returned as a match to the query signature. In order to enable similarity (in addition to containment) searches using this modified SBTMH, nodes store the cardinality of the smallest signature below each node in order to properly bound similarity. The full SBTMH does not need to be imported to RAM during searches, making this method best for rapid searching with minimal memory requirements. However, if sufficient RAM is available, searches of databases (or many signatures) may be completed in memory via an alternate database format (discussed below). 
+
+\textit{\textbf{SBTMH Utilities}} \lstinline{sourmash} provides several utilities for construction, use, and handling of SBTMH databases. These include \lstinline{sbt index} to index a collection of signatures as an SBTMH for fast searching, \lstinline{sbt append} to add signatures, and \lstinline{sbt combine} to join two SBTMH databases.
+% More? \lstinline{categorize} to identify best matches for many signatures using an SBTMH, and \lstinline{watch} to classify a stream of sequences.
+
+\subsection*{LCA Database}
+
+\lstinline{sourmash} implements an alternate database format, LCA, to support in-memory queries. This implementation utilizes two named lists to store MinHashed databases: the first containing MinHashes, and the second containing taxonomic information, with both lists named by sample name. This structure facilitates direct look-up of MinHashes, and thus can be leveraged to return additional information, such as taxonomic lineage. The LCA database structure can be prepared using the \lstinline{sourmash lca index} command.
+
+% On the large scale discussion, mention BIGSI and Mantis?
+% BIGSI: https://doi.org/10.1038/s41587-018-0010-1
+% Mantis: https://doi.org/10.1016/j.cels.2018.05.021
+
+\section*{Assessing Sequence Similarity}
+
+\subsection*{Pairwise Comparisons}
+
+For sequence comparison, \lstinline{sourmash compare} re-implements Jaccard sequence similarity comparison to enable comparison between scaled MinHashes. When abundance tracking of k-mers is enabled, \lstinline{compare} instead calculates the cosine similarity to better compare k-mer abundance between samples. While pairwise abundance comparisons were first implemented in Finch \cite{boveefinch}, \lstinline{sourmash} expands the utility of k-mer abundance tracking by implementing all-by-all comparisons. The output of \lstinline{sourmash} comparisons can be easily visualized using the \lstinline{sourmash plot} function.
+
+\subsection*{Database Searches}
+In addition to conducting pairwise comparisons, two types of database searches are implemented: breadth-first similarity searches (\lstinline{sourmash search}) and best-first containment searches (\lstinline{sourmash gather}), which support different biological queries. These searches con be conducted using either database format. 
+% \textbf{Needs: sentence on utility of SBTMH vs LCA}. % 
+
+\textit{\textbf{Similarity Queries}} Breadth-first \lstinline{sourmash search} can be used to obtain all MinHashes in the SBTMH that are present in the query signature (above a specified threshold). This style of search is streaming-compatible, as the query MinHash can be augmented as the search is occurring.
+%Containment searches evaluate the MinHash signature of the smaller set (search set) against all k-mers present in the larger set (usually a database of interest). 
+
+\textit{\textbf{Containment Queries}}
+ Best-first \lstinline{sourmash gather} implements a greedy algorithm where the SBTMH is descended on a linear path through a set of internal nodes until the highest containment leaf is reached. The hashes in this leaf are then subtracted from the query MinHash and the process is repeated until the threshold minimum is reached. \lstinline{sourmash} post-processes similarity statistics after the search such that it reports percent identity and unique identity for each match.
+
+\textit{\textbf{Taxonomy-resolved searches}}
+%\subsection*{Taxonomy-resolved searches}
+\lstinline{sourmash} can conduct taxonomy-resolved searches uses the “least common ancestor” approach (as in Kraken \cite{wood2014kraken}), to identify k-mers in a query. From this it can either find a consensus taxonomy between all the k-mers (\lstinline{sourmash classify}) or it can summarize the mixture of k-mers present in one or more signatures (\lstinline{sourmash summarize}).
+
+%\textit{\textbf{Search scale}}
+%To do: discuss how much can we search, and how fast! Compare to other methods.
+%Titus comment: note that we can search all microbial genomes with SBT and LCA, which is not currently possible with mash for whatever reason. (mash uses a linear index, but it’s hella fast.)
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section*{Use Cases}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Below we provide several use cases to demonstrate the utility of \lstinline{sourmash} for sequence comparisons. We primarily demonstrate nucleotide-level applications in this paper; protein-level \lstinline{sourmash} will be explored further in future work. Additional information and tutorials are available at \lstinline{https://sourmash.readthedocs.io}.
+
+\subsection*{Installation}
+
+To install \lstinline{sourmash}, we recommend using conda:
+
+\begin{lstlisting}
+conda install -c conda-forge \
+-c bioconda sourmash
+\end{lstlisting}
+
+% Note: tell people to set up Bioconda properly!
+% https://github.com/dib-lab/sourmash/issues/642#issuecomment-463358947
+
+Alternate installation instructions are available at sourmash.readthedocs.io. 
+
+\subsection*{Creating a signature}
+
+All \lstinline{sourmash} comparisons work on signatures, compressed representations of biological sequencing data. To create a signature from contiguous sequences (i.e. a genome) with abundance tracking:
+
+\begin{lstlisting}
+# download the genome
+curl -L  https://osf.io/bjh2y/download \
+-o GCF_000005845.2_ASM584v2_genomic.fna.gz
+
+# calculate the signature
+sourmash compute -k 21,31,51 \ 
+  --scaled 2000 \ 
+  --track-abundance \ 
+  -o GCF_000005845.2_ASM584v2_genomic.sig \
+  GCF_000005845.2_ASM584v2_genomic.fna.gz
+\end{lstlisting}
+
+Because a signature can contain multiple MinHashes, multiple k-sizes can be specified per a sequence. Only one scaled size can be used. 
+
+By default, the name of the file becomes the name of the signature. To name the signature from the first line of the sequencing file, use \lstinline{--name-from-first}. Although the \lstinline{--track-abundance} flag is optional, downstream comparison methods contain the flag \lstinline{--ignore-abundance}, or abundances can be removed with \lstinline{sourmash signature flatten}, thus we recommend calculating all signatures with abundance tracking. 
+
+\smallskip
+
+To create a signature from protein sequences:
+
+\begin{lstlisting}
+# download amino acid sequences
+curl -L https://osf.io/y9kra/download \ 
+-o GCF_000146045.2_R64_protein.faa.gz
+
+# calculate the signature
+sourmash compute -k 11,21,31 \
+    --scaled 2000 \
+    --track-abundance \
+    -o GCF_000146045.2_R64_protein.sig \ 
+    GCF_000146045.2_R64_protein.faa.gz
+\end{lstlisting}
+
+Signatures can also be made directly from reads. Depending on the downstream use cases, we recommend different preparation methods. When the user aims to \lstinline{compare} the signature to other signatures, we recommend k-mer trimming the reads before computing the signature. Because \lstinline{compare} does an all-by-all comparison of signatures, errors in the reads will falsely deflate the similarity metric. We recommend trimming RNA-seq or metagenome reads with \lstinline{trim-low-abund.py} in the khmer package \cite{crusoe2015khmer}, a dependency of \lstinline{sourmash}. 
+
+\begin{lstlisting}
+# download the reads
+curl -L -o ERR458584.fq.gz \ 
+    https://osf.io/pfxth/download
+
+# trim the reads
+trim-low-abund.py ERR458584.fq.gz \ 
+    -V -Z 10 -C 3 --gzip -M 3e9 \ 
+    -o  ERR458584.khmer.fq.gz 
+
+# calculate the signature from trimmed reads
+sourmash compute -k 21,31,51 \ 
+    --scaled 2000 \ 
+    --track-abundance \ 
+    -o ERR458584.khmer.sig \ 
+    ERR458584.khmer.fq.gz
+\end{lstlisting}
+
+When using methods that compare a signature against a database such as \lstinline{gather} or \lstinline{search}, k-mer trimming is not recommended. These methods use exact matching of hashes in the signature to those in the databases. k-mer trimming may reduce the runtime of the search, but could increase false negatives. 
+
+\begin{lstlisting}
+# calculate the signature from raw reads
+sourmash compute -k 21,31,51 \ 
+    --scaled 2000 \ 
+    --track-abundance \ 
+    -o ERR458584.sig \ 
+    ERR458584.fq.gz
+\end{lstlisting}
+
+\subsection*{Comparing many signatures}
+
+Signatures calculated with abundance tracking enable rapid comparison of sequences where k-mer frequency is variable, and can be leveraged for quality control and summarization methods. For example, principle component analysis (PCA) and multidimensional scaling (MDS) are standard quality control and summarization methods for count data generated during RNA-seq analysis \cite{conesa2016survey}. \lstinline{sourmash} can be used to build this MDS plot in an reference-free (or assembly-free) manner, using k-mer abundances of the input reads.
+
+\subsubsection*{MDS}
+
+Here, we use a set of four \textit{Saccharomyces cerevisiae} RNA-seq samples: replicate wild-type samples and replicate mutant (\textit{SNF2}) samples \cite{schurch2016many}. To use \lstinline{sourmash} to build an MDS plot, we first trim the data to remove low abundance k-mers via khmer \cite{crusoe2015khmer}. We demonstrate the streaming capability of \lstinline{sourmash} by downloading, k-mer trimming, and calculating a signature with one command. This allows the user to generate signatures without needing to store large files locally. Note: if your data quality is low or contains adapters, be sure to quality trim reads (e.g. via Trimmomatic \cite{bolger2014trimmomatic}) prior to k-mer trimming.
+
+\begin{lstlisting}
+curl -L https://osf.io/pfxth/download \ 
+  | trim-low-abund.py -V -Z 10 \ 
+  -C 3 -M 3e9 -o - -\ 
+  | sourmash compute -k 31 \ 
+  --scaled 2000 --track-abundance \ 
+  -o ERR458584.khmer.sig -
+\end{lstlisting}
+
+The signature will be named from the input filename, in this case \lstinline{-}. We can change the name to reflect its contents using the \lstinline{signature rename} function. 
+
+\begin{lstlisting}
+sourmash signature rename \ 
+    -k 31 -o ERR458584.khmer-named.sig \ 
+    ERR458584.khmer.sig \ 
+    ERR458584.khmer 
+\end{lstlisting}
+
+We can also check that the name has been changed. 
+
+\begin{lstlisting}
+sourmash signature describe \ 
+    ERR458584.khmer-named.sig
+\end{lstlisting}
+
+Using signatures from four samples, we can compare the files with the \lstinline{compare} function. Here we download signatures calculated and renamed using the above commands. We output the comparison matrix as a csv for downstream use in other platforms.
+
+\begin{lstlisting}
+# download signatures
+curl -L -o yeast-sigs.tar.gz \ 
+    https://osf.io/pk2w5/download
+
+# uncompress the signatures
+tar xvf yeast-sigs.tar.gz
+
+# compare the signatures
+sourmash compare -k 31 \ 
+  --csv yeast-comp.csv \ 
+  *named.sig
+\end{lstlisting}
+
+We then import the \lstinline{compare} similarity matrix into R to produce an MDS plot with wild-type samples (ERR459011, ERR459102) in yellow and mutant samples (ERR458584, ERR458829) in blue.
+
+\begin{lstlisting}
+# Read data into R
+comp_mat <- read.csv("yeast-comp.csv")
+
+# Set row labels
+rownames(comp_mat) <- colnames(comp_mat)
+
+# Transform for plotting
+comp_mat <- as.matrix(comp_mat)
+
+# Make an MDS plot
+fit <- dist(comp_mat)
+fit <- cmdscale(fit)
+plot(fit[ , 2] ~ fit[ , 1], 
+     xlab = "Dim 1", 
+     ylab = "Dim 2",
+     xlim= c(-.6, .9),
+     main = "sourmash Compare MDS")
+# add labels to the plot
+text(fit[ , 2]~ fit[ , 1], 
+     labels = row.names(fit), 
+     pos = 4, font = 1,
+     data = fit, 
+     col = c("blue", "blue", 
+             "orange", "orange"))
+\end{lstlisting}
+
+\begin{figure}
+\centering
+\includegraphics[width=0.4\textwidth]{sourmash-mds_f1000_fig1_biggerlabels.pdf}
+\caption{\label{fig:sourmash-mds} MDS plot generated using \lstinline{sourmash} signatures built from k-mer trimmed reads. Wild-type samples (ERR459011, ERR459102) are in yellow and mutant samples (ERR458584, ERR458829) in blue. }
+\end{figure}
+
+To see how the \lstinline{sourmash} MDS plot compares with traditional methods using transcript count data, we used Salmon \cite{patro2017salmon} to quantify abundance relative to an \textit{S. cerevisiae} reference, and edgeR \cite{robinson2010edger} to build an MDS plot. Comparison code and figure are available in the Appendix.
+
+We also find this useful for comparing other types of RNA sequencing samples (mRNA, ribo-depleted, 3' tag-seq, metatranscriptomes, and transcriptomes). 
+
+\subsubsection*{Tetranucleotide Frequency Clustering}
+We can also use \lstinline{sourmash} with abundance tracking for tetranucleotide frequency clustering. Tetranucleotide usage is species-specific, with strongest conservation in DNA coding regions \cite{Pride2003}. This is often used in metagenomics as one method to "bin" assembled contiguous sequences together that are from the same species \cite{Albertsen2013}. Recently, tetranucleotide frequency clustering using \lstinline{sourmash} was used to detect microbial contamination in the domesticated olive genome \cite{Reiter2018}. Here we reimplement this approach using 100 of the 11,038 scaffolds in the draft genome. We will calculate the signature using a k-mer size of 4, use all 4-mers, and track abundance. Then we will use \lstinline{sourmash compare} to calculate the similarity between each scaffold. Using the \lstinline{--singleton} flag, we calculate a signature for each sequence in the fasta file.
+
+\begin{lstlisting}
+# download the subsampled genome
+curl -L https://osf.io/xusfa/download \
+    -o Oe6.scaffolds.sub.fa.gz 
+    
+# calculate a signature for each scaffold
+sourmash compute -k 4 \ 
+    --scaled 1 \ 
+    --track-abundance \ 
+    --singleton \ 
+    -o Oe6.scaffolds.sub.sig \ 
+    Oe6.scaffolds.sub.fa.gz 
+
+# pairwise compare all scaffolds
+sourmash compare -k 4 \ 
+    -o Oe6.scaffolds.sub.comp \ 
+    Oe6.scaffolds.sub.sig
+\end{lstlisting}
+
+Although \lstinline{sourmash compare} supports export to a csv file, \lstinline{sourmash} also has a built in visualization function, \lstinline{plot}. We will use this to visualize scaffold similarity.
+
+\begin{lstlisting}
+sourmash plot --labels \ 
+    --vmin .4 \ 
+    Oe6.scaffolds.sub.comp 
+\end{lstlisting}
+
+In Figure 2, we see that there is high similarity between 98 of the scaffolds, but that Oe6\_s01156 and Oe6\_s01003 are outliers with tetranucleotide frequency similarity around 40\% to olive scaffolds. These two scaffolds are contaminants \cite{Reiter2018}. 
+
+\begin{figure}
+\centering
+\includegraphics[width=0.4\textwidth]{olive_genome_heatmap.pdf}
+\caption{\label{fig:olive_genome_heatmap} Heatmap and dendrogram generated using \lstinline{sourmash} signatures built from scaffolds in the domesticated olive genome. Two scaffolds are outliers when using tetranucleotide frequency to calculate similarity (highlighted in green on the dendrogram).}
+\end{figure}
+
+\subsection*{Comparisons to detect outliers}
+
+MinHash comparisons are useful for outlier detection. Below we compare 50 genomes that contain the word "\texit{Escherichia coli}." We have pre-calculated the signatures for each of these genomes. We then use the \lstinline{plot} function to visualize our comparison.
+
+\begin{lstlisting}
+# download the signatures into 
+# a folder
+mkdir escherichia-sigs
+cd escherichia-sigs
+
+curl -L https://osf.io/pc76j/download \ 
+    -o escherichia-sigs.tar.gz    
+
+# decompress the signatures
+tar xzf escherichia-sigs.tar.gz
+rm escherichia-sigs.tar.gz
+
+cd ..
+
+# pairwise compare the signatures
+sourmash compare -k 31 \ 
+    -o ecoli.comp \ 
+    escherichia-sigs/*sig
+    
+# plot the comparison
+sourmash plot --labels \ 
+    ecoli.comp
+\end{lstlisting}
+
+\begin{figure}
+\centering
+\includegraphics[width=0.4\textwidth]{compmatrix.pdf}
+\caption{\label{fig:compmatrix} Heatmap and dendrogram generated using \lstinline{sourmash} signatures built from 50 genomes that contained the word "\texit{Esherichia coli}." One signature is an outlier (highlighted in blue on the dendrogram).}
+\end{figure}
+
+We see that the minimum similarity in the matrix is 0\%. If all 50 signatures were from the same species, we would expect to observe higher minimum similarity at a k-mer size of 31. When we look closely, we see one signature has 0\% similarity with all other signatures because it is a phage (Figure 3).
+
+\subsection*{Classifying signatures}
+
+The \lstinline{search} and \lstinline{gather} functions allow the user to classify the contents of a signature by comparing it to a database of signatures. Prepared databases for microbial genomes in RefSeq and GenBank are available at \lstinline{https://sourmash.readthedocs.io/en/latest/databases.html}. However, it is also simple to create a custom database with signatures. 
+
+\bigskip
+
+Below we make a database that contains 50 \textit{Escherichia coli} genomes.
+
+
+\begin{lstlisting}
+mkdir escherichia-sigs
+cd escherichia-sigs
+
+curl -L https://osf.io/pc76j/download \ 
+    -o escherichia-sigs.tar.gz    
+
+tar xzf escherichia-sigs.tar.gz
+rm escherichia-sigs.tar.gz
+
+cd ..
+
+sourmash index -k 31 ecolidb \ 
+    escherichia-sigs/*.sig
+\end{lstlisting}
+
+\smallskip
+
+This database can be queried with \lstinline{search} and \lstinline{gather} using any signature calculated with a k-size of 31.
+
+
+First, we download a small set of k-mer trimmed \textit{Escherichia coli} reads and generate a signature with k=31.
+
+\smallskip
+
+\begin{lstlisting}
+curl -L -o ecoli-reads.khmer.fq.gz \ 
+    https://osf.io/26xm9/download \ 
+    
+sourmash compute -k 31 
+    --scaled 2000 \ 
+    ecoli-reads.khmer.fq.gz \  
+    -o ecoli-reads.sig
+\end{lstlisting}
+
+Then, we search the 50-genome database created above.
+
+\lstinline{sourmash search}: 
+
+\begin{lstlisting}
+sourmash search -k 31 \
+    ecoli-reads.sig ecolidb \  
+    --containment
+\end{lstlisting}
+
+\begin{lstlisting}[basicstyle=\tiny]
+49 matches; showing first 3:
+similarity   match
+----------   -----
+ 65.4%       NZ_JMGW01000001.1 Escherichia coli 1-176-05_S4_C2 e117605...
+ 64.9%       NZ_GG774190.1 Escherichia coli MS 196-1 Scfld2538, whole ...
+ 63.7%       NZ_JMGU01000001.1 Escherichia coli 2-011-08_S3_C2 e201108...
+\end{lstlisting}
+
+Breadth-first \lstinline{sourmash search} finds all matches in the SBTMH that are present in the query signature (above a specified threshold).
+
+Now try the same search using \lstinline{sourmash gather}.
+
+\begin{lstlisting}
+sourmash gather -k 31 \ 
+    ecoli-reads.sig ecolidb
+\end{lstlisting}
+
+\begin{lstlisting}[basicstyle=\tiny,]
+loaded query: ecoli_ref-5m.khmer.fq.gz... (k=31, DNA)
+loaded 1 databases.
+
+overlap     p_query p_match
+---------   ------- -------
+4.1 Mbp       65.4%   83.5%    NZ_JMGW01000001.1 Escherichia coli 1-...
+2.4 Mbp        2.7%    3.3%    NZ_GG749254.1 Escherichia coli FVEC14...
+3.4 Mbp        1.4%    1.7%    NZ_MOGK01000001.1 Escherichia coli st...
+3.1 Mbp        0.6%    0.7%    NZ_LVOV01000001.1 Escherichia coli st...
+3.1 Mbp        0.3%    0.4%    NZ_MIWP01000001.1 Escherichia coli st...
+3.0 Mbp        0.3%    0.4%    NZ_APWY01000001.1 Escherichia coli 17...
+3.5 Mbp        0.2%    0.2%    NZ_JNLZ01000001.1 Escherichia coli 3-...
+4.0 Mbp        0.2%    0.2%    NZ_GG774190.1 Escherichia coli MS 196...
+2.3 Mbp        0.1%    0.2%    NZ_KB732756.1 Escherichia coli KTE66 ...
+2.0 Mbp        0.1%    0.1%    NZ_BBUW01000001.1 Escherichia coli O1...
+2.3 Mbp        0.1%    0.1%    NZ_MOZX01000101.1 Escherichia coli st...
+2.3 Mbp        0.1%    0.1%    NZ_JSMW01000001.1 Escherichia coli st...
+4.0 Mbp        0.1%    0.1%    NZ_JMGU01000001.1 Escherichia coli 2-...
+2.0 Mbp        0.0%    0.0%    NZ_MOZC01000010.1 Escherichia coli st...
+2.1 Mbp        0.0%    0.0%    NZ_MKJG01000001.1 Escherichia coli st...
+1.8 Mbp        0.0%    0.0%    NZ_AEKA01000453.1 Escherichia sp. TW1...
+2.6 Mbp        0.0%    0.0%    NZ_LEAD01000071.1 Escherichia coli st...
+3.5 Mbp        0.0%    0.0%    NZ_MIWF01000001.1 Escherichia coli st...
+
+found 18 matches total;
+the recovered matches hit 71.5% of the query
+\end{lstlisting}
+
+Best-first \lstinline{sourmash gather} finds the best match first, e.g. here the first \textit{E. coli} genome has an 83\% match to 65.4\% of our query signature. The hashes that matched (65.4\% of the query) are then subtracted, and the database is queried with the remaining hashes (34.6\% of original query). This process is repeated until the threshold is reached. \lstinline{sourmash} post-processes similarity statistics after the search such that it reports percent identity and unique identity for each match.
+
+\lstinline{sourmash gather} is also useful for rapid metagenome decomposition. Below we calculate a signature of a metagenome using raw reads, and then use \lstinline{gather} to perform a best-first search against all microbial genomes in Genbank. This approach was recently used to classify unknown genomes in a "mock" metagenome \cite{Shakya2013}. The mock community was made to contain 64 genomes, but additional genomic material was inadvertently added prior to sequencing. Below we will use \lstinline{gather} to investigate the content in the mock metagenome that did not map to the 64 reference genomes. For details on how this signature was created, please see \cite{Awad2017}. Note that the GenBank database is approximately 7.8 Gb compressed, and 50 Gb decompressed. Searches of the current GenBank database run fastest if allowed to use ~11 Gb of RAM.
+
+\begin{lstlisting}
+# download the signature
+curl -L -o unmapped-qc-to-ref.fq.sig\ 
+    https://osf.io/ /download \ 
+
+# download the gather k 31 Genbank database
+curl -L -o genbank-d2-k31.tar.gz \ 
+    https://s3-us-west-2.amazonaws.com/sourmash-databases/2018-03-29/genbank-d2-k31.tar.gz
+    
+# run gather
+sourmash gather -k 31 \ 
+    -o unmapped-qc-to-ref.csv \ 
+    unmapped-qc-to-ref.fq.sig \ 
+    genbank-d2-k31
+\end{lstlisting}
+
+The output to the terminal begins:
+
+\begin{lstlisting}[basicstyle=\tiny,]
+loaded query: unmapped-qc-to-ref.fq... (k=31, DNA)
+downsampling query from scaled=10000 to 10000
+loaded 1 databases.
+
+
+overlap     p_query p_match
+---------   ------- -------
+1.6 Mbp        1.1%   19.9%    BA000019.2 Nostoc sp. PCC 7120 DNA, c...
+1.2 Mbp        0.8%   50.8%    LN831027.1 Fusobacterium nucleatum su...
+1.2 Mbp        0.8%   31.0%    CP001957.1 Haloferax volcanii DS2 pla...
+1.1 Mbp        0.8%   16.7%    BX119912.1 Rhodopirellula baltica SH ...
+1.0 Mbp        0.7%   29.0%    CH959311.1 Sulfitobacter sp. EE-36 sc...
+0.8 Mbp        0.6%   37.3%    AP008226.1 Thermus thermophilus HB8 g...
+0.8 Mbp        0.6%   56.7%    CP001941.1 Aciduliprofundum boonei T4...
+0.8 Mbp        0.5%   23.3%    FOVK01000036.1 Proteiniclasticum rumi...
+0.7 Mbp        0.5%   15.0%    CP000031.2 Ruegeria pomeroyi DSS-3, c...
+0.7 Mbp        0.5%   11.3%    CP000875.1 Herpetosiphon aurantiacus ...
+0.6 Mbp        0.4%   22.9%    BA000023.2 Sulfolobus tokodaii str. 7...
+0.6 Mbp        0.4%   13.6%    AP009153.1 Gemmatimonas aurantiaca T-...
+\end{lstlisting}
+
+We see that 20.1\% of k-mers match 82 genomes in GenBank. The majority of matches are to genomes present in the mock community. However, some species like \textit{Proteiniclasticum ruminis} were not members of the mock community. These results also highlight how \lstinline{sourmash gather} behaves with inexact matches such as strain variants. For example, we see two matches between \textit{P. ruminis} strains among all matches. This likely indicates that a \textit{P. ruminis} strain that has not been sequenced before is in our sample, and that it shares more k-mers of size 31 in common with one strain than the other. 
+
+\lstinline{sourmash gather} and \lstinline{search} also support custom databases. Using a custom database with \lstinline{sourmash gather}, we can re-find the dominant contamination identified in the domesticated olive genome \cite{Reiter2018}. Below, we will use a database containing all fungal genomes in NCBI. We will then use the streaming compatibility of \lstinline{sourmash} to download and calculate the signature. Lastly, we will search the olive genome against the fungal genomes using \lstinline{gather}.
+
+\begin{lstlisting}
+# download the fungal database
+curl -L -o fungi-genomic.tar.gz \ 
+    https://osf.io/7yzc4/download
+
+# decompress the database
+tar xf fungi-genomic.tar.gz 
+
+# download the olive genome 
+# calculate the signature
+curl -L https://osf.io/k9358/download \ 
+  | zcat \ 
+  | sourmash compute -k 31 \ 
+  --scaled 2000 --track-abundance \ 
+  -o Oe6.scaffolds.sig -
+ 
+# perform gather
+sourmash gather -k 31 \ 
+    --scaled 2000 \ 
+    -o Oe6.scaffolds.csv \
+    Oe6.scaffolds.sig \ 
+    fungi-k31
+\end{lstlisting}
+
+Using \lstinline{gather}, we see two matches both within the genus \textit{Aureobasidium}. This is the dominant contaminant within the genome \cite{Reiter2018}.
+
+\begin{lstlisting}[basicstyle=\tiny,]
+loaded query: Oe6.scaffolds.fa... (k=31, DNA)
+loaded 1 databases.
+
+
+overlap     p_query p_match avg_abund
+---------   ------- ------- ---------
+140.0 kbp      0.0%    1.0%       1.2    LVWM01000001.1 Aureobasidium pullulan...
+68.0 kbp       0.0%    0.1%       1.0    MSDY01000045.1 Aureobasidium sp. FSWF...
+found less than 30.0 kbp in common. => exiting
+
+found 2 matches total;
+the recovered matches hit 0.0% of the query
+\end{lstlisting}
+
+
+\section*{Conclusions}
+
+The \lstinline{sourmash} package provides an ecosystem of tools to conduct sequence comparisons and taxonomic classification, and makes comparison against large-scale databases such as GenBank and SRA tractable. \lstinline{sourmash} signatures are small and irreversible, which means they can be used to facilitate pre-publication data sharing that may help improve classification databases and facilitate comparisons among similar datasets. 
+
+
+\subsection*{Author contributions}
+LI and CTB are the primary authors of the sourmash package. NTP, TR and CTB drafted the manuscript. NTP, TR, PB, LI, and CTB edited the manuscript and contributed to sourmash code, documentation, and use case development. 
+
+\subsection*{Competing interests}
+The authors declare no competing interests.
+
+\subsection*{Grant information}
+This work is funded in part by the Gordon and Betty Moore Foundation’s Data-Driven Discovery Initiative through Grants GBMF4551 to C. Titus Brown. NTP was supported by an NSF Postdoctoral Fellowship in Biology (1711984).
+
+%\subsection*{Acknowledgements}
+
+
+{\small\bibliographystyle{unsrtnat}
+\bibliography{sourmash}}
+
+
+% See this guide for more information on BibTeX:
+% http://libguides.mit.edu/content.php?pid=55482&sid=406343
+
+% For more author guidance please see:
+% http://f1000research.com/author-guidelines
+
+% When all authors are happy with the paper, use the 
+% ‘Submit to F1000Research' button from the menu above
+% to submit directly to the open life science journal F1000Research.
+
+% TO DO
+
+% Add references draft (DONE)
+% Add conclusions draft (DONE)
+% Add tetramernucleotide freq clust use case (OLIVE? DONE)
+% Add gather or search use case
+% Make use case datasets
+%   yeast rna-seq examples [DONE]
+%   tetramernucleotide freq clust (DONE)
+%   protein sig - yeast proteome [DONE]
+%   e. coli genome for genome sig [DONE]
+%   reads-gather.sig - yeast reads? [DONE]
+% Upload use case datasets to osf (both)
+%   yeast rna-seq examples (OSF - DONE)
+%   tetramernucleotide freq clust
+%   protein sig - yeast proteome [OSF - DONE]
+%   e. coli genome for genome sig [OSF - DONE]
+%   reads-gather.sig - yeast reads?
+%   E coli index example [OSF -DONE]
+% Make figures
+%   yeast MDS plot [DONE]
+%   sourmash plot tet nuc freq (DONE)
+%   concept: breadth first vs depth first?
+% clean LCA section
+% Luiz add stuff - Luiz
+% Polish paper - TTL
+% Titus review - Titus
+%
+% DEADLINE: 
+% 
+
+\section*{Appendix}
+\smallskip
+
+\subsection*{MDS Comparison}
+ 
+
+\begin{figure}
+\centering
+\includegraphics[width=0.4\textwidth]{sourmash_comparison.pdf}
+\caption{\label{fig:sourmash_comparison} MDS plots produced via \lstinline{sourmash} comparison of read data and via transcript quantification analysis are similar. Wild-type \textit{S. cerevisiae} samples (ERR459011, ERR459102) are in yellow and mutant samples (ERR458584, ERR458829) in blue. }
+\end{figure}
+
+ Code to generate this MDS plot via Salmon \cite{patro2017salmon} and edgeR \cite{robinson2010edger} is available online at https://osf.io/97rt4/.
+\end{document}
+
+% unused text
+%searches to function at scales which remain intractable with other MinHash approaches, e.g. all publicly-available microbial genomes . 
+
+
+%\subsection*{Tables}
+
+%Use the table and tabledata commands for basic tables --- see Table~\ref{tab:widgets}, for example.
+%\begin{table}[h!]
+%\hrule \vspace{0.1cm}
+%\caption{\label{tab:widgets}An example of a simple table with caption.}
+%\centering
+%\begin{tabledata}{llr} 
+%\header First name & Last Name & Grade \\ 
+%\row John & Doe & $7.5$ \\ 
+%\row Richard & Miles & $2$ \\ 
+%\end{tabledata}
+%\end{table}
+
