@@ -136,7 +136,8 @@ SBTMH trees can be combined if desired: In the simplest case, adding a new root 
 
 \subsection*{Pairwise Comparisons}
 
-For sequence comparison, \lstinline{sourmash compare} re-implements Jaccard sequence similarity comparison to enable comparison between scaled MinHashes. When abundance tracking of k-mers is enabled, \lstinline{compare} instead calculates the cosine similarity to better compare k-mer abundance between samples. While pairwise abundance comparisons were first implemented in Finch \cite{boveefinch}, \lstinline{sourmash} expands the utility of k-mer abundance tracking by implementing all-by-all comparisons. The output of \lstinline{sourmash} comparisons can be easily visualized using the \lstinline{sourmash plot} function.
+For sequence comparison, \lstinline{sourmash compare} re-implements Jaccard sequence similarity comparison to enable comparison between scaled MinHashes. When abundance tracking of k-mers is enabled, \lstinline{compare} instead calculates the cosine similarity, although we recommend using more accurate approaches for detailed comparisons \cite{hulkrowe}.
+%While pairwise abundance comparisons were first implemented in Finch \cite{boveefinch}, \lstinline{sourmash} expands the utility of k-mer abundance tracking by implementing all-by-all comparisons. The output of \lstinline{sourmash} comparisons can be easily visualized using the \lstinline{sourmash plot} function.
 
 \subsection*{Database Searches}
 In addition to conducting pairwise comparisons, two types of database searches are implemented: breadth-first similarity searches (\lstinline{sourmash search}) and best-first containment searches (\lstinline{sourmash gather}), which support different biological queries. These searches con be conducted using either database format. 
