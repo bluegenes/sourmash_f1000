@@ -135,7 +135,7 @@
   year={2010},
   publisher={Oxford University Press}
 }
-% cite something else for tetranucleotide frequency?
+
 @article{Albertsen2013,
   doi = {10.1038/nbt.2579},
   url = {https://doi.org/10.1038/nbt.2579},
@@ -150,17 +150,14 @@
   journal = {Nature Biotechnology}
 }
 
-@article {Koslicki184150,
-	author = {Koslicki, David and Zabeti, Hooman},
-	title = {Improving Min Hash via the Containment Index with applications to Metagenomic Analysis},
-	elocation-id = {184150},
-	year = {2017},
-	doi = {10.1101/184150},
-	publisher = {Cold Spring Harbor Laboratory},
-	abstract = {Min hash is a probabilistic method for estimating the similarity of two sets in terms of their Jaccard index, defined as the ration of the size of their intersection to their union. We demonstrate that this method performs best when the sets under consideration are of similar size and the performance degrades considerably when the sets are of very different size. We introduce a new and efficient approach, called the containment min hash approach, that is more suitable for estimating the Jaccard index of sets of very different size. We accomplish this by leveraging another probabilistic method (in particular, Bloom filters) for fast membership queries. We derive bounds on the probability of estimate errors for the containment min hash approach and show it significantly improves upon the classical min hash approach. We also show significant improvements in terms of time and space complexity. As an application, we use this method to detect the presence/absence of organisms in a metagenomic data set, showing that it can detect the presence of very small, low abundance microorganisms.},
-	URL = {https://www.biorxiv.org/content/early/2017/09/04/184150},
-	eprint = {https://www.biorxiv.org/content/early/2017/09/04/184150.full.pdf},
-	journal = {bioRxiv}
+@article{koslicki2019improving,
+  title={Improving MinHash via the containment index with applications to metagenomic analysis},
+  author={Koslicki, David and Zabeti, Hooman},
+  journal={Applied Mathematics and Computation},
+  volume={354},
+  pages={206--215},
+  year={2019},
+  publisher={Elsevier}
 }
 @article{berlin2015assembling,
   title={Assembling large genomes with single-molecule sequencing and locality-sensitive hashing},
@@ -172,19 +169,13 @@
   year={2015},
   publisher={Nature Publishing Group}
 }
-@article{rowe2018streaming,
-  title={Streaming histogram sketching for rapid microbiome analytics},
-  author={Rowe, Will PM and Carrieri, Anna Paola and Alcon-Giner, Cristina and Caim, Shabhonam and Shaw, Alex and Sim, Kathleen and Kroll, J Simon and Hall, Lindsay and Pyzer-Knapp, Edward O and Winn, Martyn D},
-  journal={bioRxiv},
-  pages={408070},
-  year={2018},
-  publisher={Cold Spring Harbor Laboratory}
-}
+
 @misc{mash_screen, 
-title={Mash Screen: what's in my sequencing run?}, url={https://genomeinformatics.github.io/mash-screen/},
+title={Mash Screen: What's in my Sequencing Run?}, url={genomeinformatics.github.io/mash-screen},
 year={2017}, 
 month={Sept}
 }
+
 @article{zhao2018bindash,
   title={BinDash, software for fast genome distance estimation on a typical personal laptop},
   author={Zhao, XiaoFei},
@@ -192,9 +183,9 @@ month={Sept}
   year={2018}
 }
 
-% cite something else for SRA size?
 @misc{ncbi_2018, 
-title={Sequence Read Archive Overview}, url={https://trace.ncbi.nlm.nih.gov/Traces/sra/sra.cgi},
+title={Sequence Read Archive Overview}, 
+url={trace.ncbi.nlm.nih.gov/Traces/sra/sra.cgi},
 journal={National Center for Biotechnology Information},
 publisher={U.S. National Library of Medicine},
 year={2018}, 
@@ -303,4 +294,22 @@ month={Dec}
   author = {Migun Shakya and Christopher Quince and James H. Campbell and Zamin K. Yang and Christopher W. Schadt and Mircea Podar},
   title = {Comparative metagenomic and {rRNA} microbial diversity characterization using archaeal and bacterial synthetic communities},
   journal = {Environmental Microbiology}
+}
+@article{rowe2019streaming,
+  title={Streaming histogram sketching for rapid microbiome analytics},
+  author={Rowe, Will PM and Carrieri, Anna Paola and Alcon-Giner, Cristina and Caim, Shabhonam and Shaw, Alex and Sim, Kathleen and Kroll, J Simon and Hall, Lindsay J and Pyzer-Knapp, Edward O and Winn, Martyn D},
+  journal={Microbiome},
+  volume={7},
+  number={1},
+  pages={40},
+  year={2019},
+  publisher={BioMed Central}
+}
+@article{spacegraphcats,
+  title={Exploring neighborhoods in large metagenome assembly graphs reveals hidden sequence diversity},
+  author={Brown, C Titus and Moritz, Dominik and O'brien, Michael and Reidl, Felix and Reiter, Taylor and Sullivan, Blair},
+  journal={BioRxiv},
+  pages={462788},
+  year={2019},
+  publisher={Cold Spring Harbor Laboratory}
 }

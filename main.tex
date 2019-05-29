@@ -61,7 +61,7 @@ bioinformatics, sequence analysis, MinHash, k-mer, sourmash
 
 Bioinformatic analyses rely on sequence comparison for many applications, including variant analysis, taxonomic classification and functional annotation. As the Sequence Read Archive now contains over 20 Petabases of data \cite{ncbi_2018}, there is great need for methods to quickly and efficiently conduct similarity searches on a massive scale. MinHash techniques \cite{broder1997resemblance} utilize random sampling of k-mer content to generate small subsets known as "sketches" such that Jaccard similarity (the intersection over the union) of two sequence data sets remains approximately equal to their true Jaccard similarity \cite{broder1997resemblance, ondov2016mash}. The many-fold size reductions gained via MinHash open the door to extremely large scale searches.
 
-While the initial k-mer MinHash implementation focused on enabling Jaccard similarity comparisons \cite{ondov2016mash}, it has since been modified and extended to enable k-mer abundance comparisons \cite{boveefinch}, decrease runtime and memory requirements \cite{zhao2018bindash}, and work on streaming input data \cite{rowe2018streaming}. Furthermore, as Jaccard similarity is impacted by the relative size of the sets being compared, containment searches \cite{broder1997resemblance, Koslicki184150, mash_screen} have been developed to enable detection of a small set within a larger set, such as a genome within a metagenome.
+While the initial k-mer MinHash implementation focused on enabling Jaccard similarity comparisons \cite{ondov2016mash}, it has since been modified and extended to enable k-mer abundance comparisons \cite{boveefinch}, decrease runtime and memory requirements \cite{zhao2018bindash}, and work on streaming input data \cite{rowe2019streaming}. Furthermore, as Jaccard similarity is impacted by the relative size of the sets being compared, containment searches \cite{broder1997resemblance, koslicki2019improving, mash_screen} have been developed to enable detection of a small set within a larger set, such as a genome within a metagenome.
 
 Here we present version 2.0 of \lstinline{sourmash} \cite{brown2016sourmash}, a Python library for building and utilizing MinHash sketches of DNA, RNA, and protein data. \lstinline{sourmash} incorporates and extends standard MinHash techniques for sequencing data, with a particular focus towards enabling efficient containment queries using large databases. This is accomplished with two modifications: (1) building sketches via a modulo approach \cite{broder1997resemblance}, and (2) implementing a modified Sequence Bloom Tree \cite{solomon2016fast} to enable both similarity and containment searches. In most cases, these features enable \lstinline{sourmash} database comparisons in sub-linear time.
 % sub-linear time is not true in all cases: if the threshold is too low, you end up doing more work (going through more internal nodes) than just doing a linear search on the signatures. See figure 3 in the allsome SBT paper https://doi.org/10.1007/978-3-319-56970-3_17
@@ -73,14 +73,14 @@ This enables comparisons between datasets of disparate sizes but can sacrifice s
 To enable large-scale database searches using these signatures, \lstinline{sourmash} implements a modified Sequence Bloom Tree, the SBTMH, that allows both similarity (\lstinline{sourmash search}) and containment (\lstinline{sourmash gather}) searches for taxonomic exploration and classification. Notably, Jaccard similarity searches using this modified SBT require storage of the cardinality of the smallest MinHash below each node in order to properly bound similarity. \lstinline{sourmash} also implements a second database format, LCA, for in-memory search when sufficient RAM is available or database size is tractable. 
 
 In addition to these modifications, \lstinline{sourmash} implements k-mer abundance tracking \cite{boveefinch} within signatures to allow abundance comparisons across datasets and facilitate metagenome, metatranscriptome, and transcriptome analyses, and is compatible with streaming approaches. 
-The \lstinline{sourmash} library is implemented in C++, Rust \cite{Matsakis:2014:RL:2692956.2663188}, and Python, and can be accessed both via command line and Python API. The code is available under the BSD license at \lstinline{http://github.com/dib-lab/sourmash}. %more on library functionality?
+The \lstinline{sourmash} library is implemented in C++, Rust \cite{Matsakis:2014:RL:2692956.2663188}, and Python, and can be accessed both via command line and Python API. The code is available under the BSD license at \lstinline{http://github.com/dib-lab/sourmash}.
 
 
 \section*{Implementation}
 
-\lstinline{sourmash} provides a user-friendly, extensible platform for MinHash signature generation and manipulation for DNA, RNA, and protein data. Sourmash is designed to facilitate containment queries for taxonomic exploration and identification while maintaining all functionality available via standard genomic MinHash techniques. % improve last phrase of this sentence / emphasize library functionality, etc!
+\lstinline{sourmash} provides a user-friendly, extensible platform for MinHash signature generation and manipulation for DNA, RNA, and protein data. Sourmash is designed to facilitate containment queries for taxonomic exploration and identification while maintaining all functionality available via standard genomic MinHash techniques. 
 
-% discuss Jaccard Index, Jaccard containment here
+% discuss Jaccard Index, Jaccard containment here?
 %$$J(A, B) = \frac{\left| A \cap B \right|}{\left| A \cup B \right|}$$
 
 %$$C(A, B) = \frac{\left| A \cap B \right|}{\left| A \right|}$$
@@ -91,8 +91,6 @@ The \lstinline{sourmash} library is implemented in C++, Rust \cite{Matsakis:2014
 
 \textit{\textbf{Scaling}} \lstinline{sourmash} implements a method inspired by modulo sketches \cite{broder1997resemblance} to dynamically scale hash subset retention size (\textit{n}). When using scaled signatures, users provide  a scaling factor (\textit{s}) that divides the hash space into \textit{s} equal bands, retaining hashes within the minimum band as the sketch. These scaled signatures can be converted to standard bottom-hash signatures, if the subset retention size \textit{n} is equal to or smaller than the number of hashes in the scaled signature. \lstinline{sourmash} provides a signature utility, \lstinline{downsample}, to convert sketches when possible. Finally, to maintain compatibility with sketches generated by other programs such as Mash \cite{ondov2016mash}, \lstinline{sourmash} generates standard bottom-hash MinHash sketches if users specify the hash subset size \textit{n} rather than scaling factor.
 
-
-% koslicki: https://www.biorxiv.org/content/early/2017/09/04/184150
 
 % Titus comment: It’s important to note that we haven’t really done the math to make sure that sourmash scaled works properly. It should always be bounded by the MinHash math limits as long as the number of scaled hashes is larger than the size of the regular minhash, which is true for large data sets.
 
@@ -136,7 +134,7 @@ SBTMH trees can be combined if desired: In the simplest case, adding a new root 
 
 \subsection*{Pairwise Comparisons}
 
-For sequence comparison, \lstinline{sourmash compare} re-implements Jaccard sequence similarity comparison to enable comparison between scaled MinHashes. When abundance tracking of k-mers is enabled, \lstinline{compare} instead calculates the cosine similarity, although we recommend using more accurate approaches for detailed comparisons \cite{hulkrowe}.
+For sequence comparison, \lstinline{sourmash compare} re-implements Jaccard sequence similarity comparison to enable comparison between scaled MinHashes. When abundance tracking of k-mers is enabled, \lstinline{compare} instead calculates the cosine similarity, although we recommend using more accurate approaches for detailed comparisons \cite{rowe2019streaming}.
 %While pairwise abundance comparisons were first implemented in Finch \cite{boveefinch}, \lstinline{sourmash} expands the utility of k-mer abundance tracking by implementing all-by-all comparisons. The output of \lstinline{sourmash} comparisons can be easily visualized using the \lstinline{sourmash plot} function.
 
 \subsection*{Database Searches}
